@@ -532,7 +532,9 @@ class InferenceServerClient:
               model_name,
               model_version="",
               request_id=None,
-              parameters=None):
+              sequence_id=0,
+              sequence_start=False,
+              sequence_end=False):
         """Run synchronous inference using the supplied 'inputs' requesting
         the outputs specified by 'outputs'.
 
@@ -555,8 +557,17 @@ class InferenceServerClient:
             Optional identifier for the request. If specified will be returned
             in the response. Default value is 'None' which means no request_id
             will be used.
-        parameters: dict
-            Optional inference parameters described as key-value pairs.
+        sequence_id: int
+            Indicates which sequence does the request belongs to. All inference
+            requests that belong to the same sequence must use the same sequence
+            ID. A sequence ID of 0 indicates the inference request is not part of
+            a sequence. Default value is 0.
+        sequence_start: bool
+            Indicates whether the request is first in the sequence. Default value
+            is False.
+        sequence_end: bool
+            Indicates whether the request is last in the sequence. Default value
+            is False.
 
         Returns
         -------
@@ -570,6 +581,11 @@ class InferenceServerClient:
             If server fails to perform inference.
         """
 
+        parameters = {}
+        if sequence_id != 0:
+            parameters['sequence_id'] = sequence_id
+            parameters['sequence_start'] = sequence_start
+            parameters['sequence_end'] = sequence_end
         request = self._get_inference_request(inputs, outputs, model_name,
                                               model_version, request_id,
                                               parameters)
@@ -588,7 +604,10 @@ class InferenceServerClient:
                     model_name,
                     model_version="",
                     request_id=None,
-                    parameters=None):
+                    parameters=None,
+                    sequence_id=0,
+                    sequence_start=False,
+                    sequence_end=False):
         """Run asynchronous inference using the supplied 'inputs' requesting
         the outputs specified by 'outputs'.
 
@@ -618,8 +637,17 @@ class InferenceServerClient:
             Optional identifier for the request. If specified will be returned
             in the response. Default value is 'None' which means no request_id
             will be used.
-        parameters: dict
-            Optional inference parameters described as key-value pairs.
+        sequence_id: int
+            Indicates which sequence does the request belongs to. All inference
+            requests that belong to the same sequence must use the same sequence
+            ID. A sequence ID of 0 indicates the inference request is not part of
+            a sequence. Default value is 0.
+        sequence_start: bool
+            Indicates whether the request is first in the sequence. Default value
+            is False.
+        sequence_end: bool
+            Indicates whether the request is last in the sequence. Default value
+            is False.
     
         Raises
         ------
@@ -634,6 +662,12 @@ class InferenceServerClient:
             except grpc.RpcError as rpc_error:
                 error = get_error_grpc(rpc_error)
             callback(result=result, error=error)
+
+        parameters = {}
+        if sequence_id != 0:
+            parameters['sequence_id'] = sequence_id
+            parameters['sequence_start'] = sequence_start
+            parameters['sequence_end'] = sequence_end
 
         request = self._get_inference_request(inputs, outputs, model_name,
                                               model_version, request_id,
