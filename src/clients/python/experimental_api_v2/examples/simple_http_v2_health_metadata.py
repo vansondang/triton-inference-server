@@ -59,7 +59,7 @@ if __name__ == '__main__':
     if not triton_client.is_server_live():
         print("FAILED : is_server_live")
         sys.exit(1)
-    
+
     if not triton_client.is_server_ready():
         print("FAILED : is_server_ready")
         sys.exit(1)
