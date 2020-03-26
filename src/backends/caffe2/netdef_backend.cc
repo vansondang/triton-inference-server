@@ -540,12 +540,12 @@ NetDefBackend::Context::Run(
   }
 
   // Additional inputs added to the provider...
-  const InferRequestProvider::InputOverrideMapVec& input_override_maps =
+  const InferenceRequest::InputOverrideMapVec& input_override_maps =
       input_request_provider->GetInputOverrides();
   for (const auto& ovr_map : input_override_maps) {
     for (const auto& pr : *ovr_map) {
       const std::string& name = pr.first;
-      const InferRequestProvider::InputOverride& override = pr.second;
+      const InferenceRequest::InputOverride& override = pr.second;
       RETURN_IF_ERROR(SetInput(
           name, override.datatype_, override.dims_, total_batch_size, payloads,
           &input_buffers, &inputs, &cuda_copy));

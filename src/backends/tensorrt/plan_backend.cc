@@ -1337,21 +1337,32 @@ PlanBackend::Context::PeekShapeTensor(
     shape->push_back(dims[i]);
   }
 
-  // If have an provider override for this tensor already (because
-  // peek was already called, then mark it as not being consumed so
-  // that the next peek or usage will be able to access it. If don't
-  // already have an override, add it...
-  if (payload.request_provider_->HasInputOverride(input.Name())) {
-    payload.request_provider_->SetInputOverrideConsumed(input.Name(), false);
+  // Peeking is expensive so use input override to record the
+  // value. If there is already an input override for this tensor
+  // already (because peek was already called), then mark it as not
+  // being consumed so that the next peek or usage will be able to
+  // access it.
+  auto overrides = payload.request_->MutableOverrideInputs();
+  auto pr = overrides->find(input.Name());
+  if (pr != overrides->end()) {
+    pr->second.ResetDataCursor();
   } else {
-    InferRequestProvider::InputOverride override;
-    override.content_.assign(content, content + content_byte_size);
-    override.dims_ = input.Shape();
-    override.datatype_ = DataType::TYPE_INT32;
+    InferenceRequest::Input* override;
+    RETURN_IF_ERROR(payload.request_->AddOverrideInput(
+        input.Name(), input.Shape(), DataType::TYPE_INT32, content_byte_size,
+        &override));
 
-    auto overrides = std::make_shared<InferRequestProvider::InputOverrideMap>();
-    overrides->insert(std::make_pair(input.Name(), override));
-    payload.request_provider_->AddInputOverrides(overrides);
+    // If a buffer was allocated to hold the shape then want to take
+    // ownership of that for the override. Otherwise the override can
+    // just point to the existing data for the input which is already
+    // contiguous.
+    if (contiguous_buffer->TotalByteSize() > 0) {
+      auto buf = std::make_shared<AllocatedMemory>(contiguous_buffer.release());
+      RETURN_IF_ERROR(override->SetData(buf));
+    } else {
+      RETURN_IF_ERROR(override->AppendData(
+          content, content_byte_size, TRTSERVER_MEMORY_CPU, 0));
+    }
   }
 
   return Status::Success;

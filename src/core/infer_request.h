@@ -88,15 +88,15 @@ class InferenceRequest {
         const void* base, size_t byte_size, TRTSERVER_Memory_Type memory_type,
         int64_t memory_type_id);
 
-    // Set the data for this input. Error is input already has some
+    // Set the data for this input. Error if input already has some
     // data.
     Status SetData(const std::shared_ptr<Memory>& data);
 
     // Remove all existing data for the input.
     Status RemoveAllData();
 
-    // Prepare this input for inference.
-    void PrepareForInference();
+    // Reset so that data can be read again.
+    void ResetDataCursor() { data_idx_ = 0; }
 
     // Get the next contiguous chunk of bytes for the input. Return a
     // pointer to the chunk in 'content'.  If there are no more bytes
@@ -114,7 +114,7 @@ class InferenceRequest {
     // preferred by the function caller.  On return 'memory_type_id'
     // gives the actual memory type id of the chunk pointed to by
     // 'content'.
-    virtual Status NextContent(
+    Status NextContent(
         const void** content, size_t* content_byte_size,
         TRTSERVER_Memory_Type* memory_type, int64_t* memory_type_id);
 
@@ -157,6 +157,7 @@ class InferenceRequest {
     uint32_t classification_cnt_;
   };
 
+  // InferenceRequest
   InferenceRequest(
       const std::string& model_name, const int64_t requested_model_version,
       const int64_t actual_model_version, const uint32_t protocol_version);
@@ -213,6 +214,15 @@ class InferenceRequest {
     return requested_outputs_;
   }
 
+  std::unordered_map<std::string, Input>* MutableOverrideInputs()
+  {
+    return &override_inputs_;
+  }
+  const std::unordered_map<std::string, Input>& OverrideInputs() const
+  {
+    return override_inputs_;
+  }
+
   // Add an input to the request. If 'input' is non-null return a
   // pointer to the newly added input.
   Status AddInput(
@@ -237,10 +247,86 @@ class InferenceRequest {
   Status RemoveRequestedOutput(const std::string& name);
   Status RemoveAllRequestedOutputs();
 
+  // Add an override input to the request. Override inputs are added
+  // internally by Triton and are kept separate from the other inputs.
+  // They are not persisted across inference calls. If 'input' is
+  // non-null return a pointer to the newly added input.
+  Status AddOverrideInput(
+      const std::string& name, const std::vector<int64_t>& shape,
+      const uint64_t batch_byte_size, Input** input = nullptr);
+
   // Prepare this request for inference. We pass backend here as
   // non-shared-ptr because normalize must be used in contexts where
   // the backend shared_ptr does not yet exist (e.g. warmup).
   Status PrepareForInference(const InferenceBackend& backend);
+
+
+  // FIXMEV2 input override methods
+#if 0
+  // Get the next contiguous chunk of bytes for the 'name'd
+  // input. Return a pointer to the chunk in 'content'.
+  // If there are no more bytes for the input return 'content' == nullptr.
+  // 'content_byte_size' acts as both input and output. On input
+  // 'content_byte_size' is a hint of the maximum chunk size that
+  // should be returned in 'content' and must be non-zero unless no
+  // additional input is expected. On return 'content_byte_size' gives
+  // the actual size of the chunk pointed to by 'content'.
+  // 'memory_type' acts as both input and output. On input 'memory_type'
+  // is the buffer memory type preferred by the function caller, it will
+  // not affect the function behavior, but it will be propagated to the
+  // buffer and the buffer owner may collect such information for other use.
+  // On return 'memory_type' gives the actual memory type of the chunk
+  // pointed to by 'content'.
+  // 'memory_type_id' acts as both input and output. On input 'memory_type_id'
+  // is the buffer memory type id preferred by the function caller, it will
+  // not affect the function behavior, but it will be propagated to the
+  // buffer and the buffer owner may collect such information for other use.
+  // On return 'memory_type_id' gives the actual memory type id of the chunk
+  // pointed to by 'content'.
+  Status GetNextInputContent(
+      const std::string& name, const void** content, size_t* content_byte_size,
+      TRTSERVER_Memory_Type* memory_type, int64_t* memory_type_id);
+
+  // Retrieve the data buffer of input 'name'. This function will not check
+  // input override.
+  Status GetMemory(
+      const std::string& name, std::shared_ptr<Memory>* input_buffer);
+
+  // Similar to above, but the function caller does not own the Memory object,
+  // nor extend its lifetime. This function will check input override.
+  Status GetMemoryWithOverride(
+      const std::string& name, const Memory** input_buffer);
+
+  // Set content for named inputs. If the input already has content,
+  // this content will be used in-place of existing content.
+  struct InputOverride {
+    std::vector<uint8_t> content_;
+    std::vector<int64_t> dims_;
+    DataType datatype_;
+    // Alternative representation of 'content_' in the form of Memory class
+    MemoryReference content_ref_;
+  };
+
+  using InputOverrideMap = std::unordered_map<std::string, InputOverride>;
+  using InputOverrideMapVec = std::vector<std::shared_ptr<InputOverrideMap>>;
+  const InputOverrideMapVec& GetInputOverrides() const;
+  Status AddInputOverrides(const std::shared_ptr<InputOverrideMap>& overrides);
+  bool HasInputOverride(const std::string& name);
+  bool GetInputOverrideShape(
+      const std::string& name, std::vector<int64_t>* shape);
+  void SetInputOverrideConsumed(const std::string& name, const bool consumed);
+
+  // Get the override content for 'name'd input. Return a pointer to
+  // the override content in 'content'.  Return the override content
+  // byte-size in 'content_byte_size'.  Return true if there is
+  // override content (and so 'content' and 'content_byte_size' are
+  // valid) or false if there is no override content (and so 'content'
+  // and 'content_byte_size' are unchanged).
+  bool GetInputOverrideContent(
+      const std::string& name, const void** content, size_t* content_byte_size);
+#endif
+  // FIXMEV2 end input override methods
+
 
  private:
   Status NormalizeV1(const InferenceBackend& backend);
@@ -273,6 +359,22 @@ class InferenceRequest {
 
   std::unordered_map<std::string, Input> inputs_;
   std::unordered_map<std::string, RequestedOutput> requested_outputs_;
+  std::unordered_map<std::string, Input> override_inputs_;
+
+  // FIXMEV2 input override methods
+#if 0
+  // Input content overrides. Multiple maps can be provided but a
+  // given tensor must not appear in more than one map.
+  InputOverrideMapVec overrides_maps_;
+
+  // The inputs that have had their override content consumed by a
+  // call to GetInputOverrideContent. A given input override will only
+  // return the content once and on subsequent calls will return
+  // 'content' == nullptr to indicate that all the override content
+  // has been consumed.
+  std::set<std::string> overrides_consumed_;
+#endif
+  // FIXMEV2 end input override methods
 };
 
 }}  // namespace nvidia::inferenceserver

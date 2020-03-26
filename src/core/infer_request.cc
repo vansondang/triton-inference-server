@@ -204,11 +204,35 @@ InferenceRequest::RemoveAllRequestedOutputs()
 }
 
 Status
+InferenceRequest::AddOverrideInput(
+    const std::string& name, const std::vector<int64_t>& shape,
+    const uint64_t batch_byte_size, InferenceRequest::Input** input)
+{
+  const auto& pr = override_inputs_.emplace(std::make_pair(
+      name, InferenceRequest::Input(name, shape, batch_byte_size)));
+  if (!pr.second) {
+    return Status(
+        RequestStatusCode::INVALID_ARG,
+        "override input '" + name + "' already exists in request");
+  }
+
+  if (input != nullptr) {
+    *input = std::addressof(pr.first->second);
+  }
+
+  return Status::Success;
+}
+
+Status
 InferenceRequest::PrepareForInference(const InferenceBackend& backend)
 {
+  // Remove override inputs as those are added during inference
+  // processing as necessary.
+  override_inputs_.clear();
+
   // Prepare all inputs...
   for (auto& pr : inputs_) {
-    pr.second.PrepareForInference();
+    pr.second.ResetDataCursor();
   }
 
   // If anything has potentially changed in the inference request then
@@ -551,12 +575,6 @@ InferenceRequest::Input::Input(
     : name_(name), datatype_(datatype),
       original_shape_(shape, shape + dim_count), batch_byte_size_(0)
 {
-}
-
-void
-InferenceRequest::Input::PrepareForInference()
-{
-  data_idx_ = 0;
 }
 
 Status
